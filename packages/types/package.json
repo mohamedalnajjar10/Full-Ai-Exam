@@ -1,0 +1,17 @@
+{
+  "name": "@ai-exam/types",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Shared HTTP contract between @ai-exam/api and @ai-exam/web",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "node -e \"console.log('@ai-exam/types: ok')\""
+  },
+  "devDependencies": {
+    "typescript": "^5.7.3"
+  }
+}

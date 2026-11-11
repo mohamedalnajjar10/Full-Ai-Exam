@@ -1,0 +1,41 @@
+# dependencies
+node_modules/
+
+# build output
+dist/
+build/
+.next/
+out/
+*.tsbuildinfo
+
+# environment / secrets
+.env
+.env.*
+!.env.example
+
+# uploads & local storage
+uploads/
+
+# test & coverage
+coverage/
+.nyc_output/
+
+# logs
+*.log
+npm-debug.log*
+yarn-error.log*
+
+# editor / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# superseded pre-monorepo copies (delete once verified)
+.superseded-*/
+
+# built output of the shared types package
+packages/types/dist/
+
+# documentation / notes
+PROJECT_EXPLANATION.md

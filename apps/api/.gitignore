@@ -1,0 +1,31 @@
+# dependencies
+node_modules/
+
+# build output
+dist/
+build/
+*.tsbuildinfo
+
+# environment / secrets
+.env
+.env.*
+!.env.example
+
+# uploads & local storage
+uploads/
+
+# test & coverage
+coverage/
+.nyc_output/
+
+# logs
+*.log
+npm-debug.log*
+
+# editor / OS
+.DS_Store
+.idea/
+*.swp
+
+# نماذج التضمين المحلية (Transformers.js) — بتنزل تلقائياً أول مرة
+.cache/

@@ -1,0 +1,730 @@
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "debian-openssl-3.0.x", "rhel-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  STUDENT
+  ADMIN
+  PARENT
+}
+
+enum ParentLinkStatus {
+  PENDING
+  ACTIVE
+  REVOKED
+}
+
+enum AssessmentAttemptStatus {
+  PENDING
+  COMPLETED
+}
+
+enum ExamFileStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+enum StagedQuestionStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum DifficultyLevel {
+  EASY
+  MEDIUM
+  HARD
+}
+
+enum BloomTaxonomyLevel {
+  REMEMBER
+  UNDERSTAND
+  APPLY
+  ANALYZE
+  EVALUATE
+  CREATE
+}
+
+enum EmbeddingStatus {
+  PENDING
+  INDEXED
+  FAILED
+}
+
+enum KnowledgeSourceKind {
+  BOOK
+  EXAM
+}
+
+/// مراحل خط المعالجة: رفع ← استخراج ← تقطيع ← تضمين ← مفهرس.
+/// CHUNKED = انقطّع وما انعمله تضمين (خيار «التضمين فوراً» مطفي).
+enum IngestionStage {
+  UPLOADED
+  EXTRACTING
+  CHUNKING
+  CHUNKED
+  EMBEDDING
+  INDEXED
+  FAILED
+}
+
+model User {
+  id                     String              @id @default(cuid())
+  email                  String              @unique
+  passwordHash           String?
+  name                   String?
+  role                   Role                @default(STUDENT)
+  avatar                 String?
+  branchId               String?
+  branch                 Branch?             @relation(fields: [branchId], references: [id])
+  twoFactorEnabled       Boolean             @default(false)
+  twoFactorSecret        String?
+  twoFactorRecoveryCodes String[]            @default([])
+  emailVerified          Boolean             @default(false)
+  oauthProvider          String?
+  oauthProviderId        String?
+  /// دور الفريق (للحسابات بدور ADMIN فقط) — بيحدد الصلاحيات
+  staffRoleId            String?
+  staffRole              StaffRole?          @relation(fields: [staffRoleId], references: [id])
+  /// موقوف: ما بيقدر يسجّل دخول ولا يجدّد جلسته
+  suspendedAt            DateTime?
+  suspendedReason        String?
+  /// آخر طلب موثّق (بيتحدّث كل بضع دقائق، مش كل طلب)
+  lastActiveAt           DateTime?
+  /// حصة توليد يومية خاصة بالحساب؛ null = حصة دوره أو الافتراضية
+  dailyQuota             Int?
+  flaggedChatSessions    ChatSession[]       @relation("FlaggedChatSessions")
+  aiUsage                AiUsageLog[]
+  refreshTokens          RefreshToken[]
+  uploadedExamFiles      ExamFile[]
+  knowledgeDocuments     KnowledgeDocument[]
+  styleUploads           StyleSourceUpload[] @relation("StudentStyleUploads")
+  generatedQuestions     GeneratedQuestion[] @relation("StudentGeneratedQuestions")
+  chatSessions           ChatSession[]       @relation("StudentChatSessions")
+  assessmentAttempts     AssessmentAttempt[]
+  parentLinks            ParentStudentLink[] @relation("ParentRelations")
+  studentLinks           ParentStudentLink[] @relation("StudentRelations")
+  pushSubscriptions      PushSubscription[]
+  studentActivityEvents  StudentActivityEvent[] @relation("StudentActivityEvents")
+  subscriptions          UserSubscription[]
+  createdAt              DateTime            @default(now())
+  updatedAt              DateTime            @updatedAt
+
+  @@unique([oauthProvider, oauthProviderId])
+  @@index([branchId])
+  @@index([role])
+  @@index([staffRoleId])
+  @@index([lastActiveAt])
+}
+
+/// أدوار فريق الإدارة. الصلاحيات معرّفة بالكود (packages/types permissions)
+/// والدور بيخزّن معرّفاتها. أدوار النظام (system) ما بتنحذف ولا بتتعدّل صلاحياتها.
+model StaffRole {
+  id          String   @id
+  name        String
+  description String   @default("")
+  permissions String[] @default([])
+  system      Boolean  @default(false)
+  /// حصة التوليد اليومية لأعضاء الدور؛ null = بلا حد
+  dailyQuota  Int?
+  users       User[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+// Model for storing server-side refresh tokens (hash only, never the raw token)
+model RefreshToken {
+  id        String    @id @default(cuid())
+  userId    String
+  tokenHash String    @unique
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([userId, revokedAt])
+  @@index([expiresAt])
+}
+
+model Branch {
+  id                 String              @id @default(cuid())
+  name               String              @unique
+  subjects           Subject[]
+  users              User[]
+  examFiles          ExamFile[]
+  examBankQuestions  ExamBankQuestion[]
+  knowledgeDocuments KnowledgeDocument[]
+  createdAt          DateTime            @default(now())
+}
+
+model Subject {
+  id                  String              @id @default(cuid())
+  name                String
+  branchId            String
+  bookPdfKey          String?
+  bookPdfOriginalName String?
+  bookPdfSize         Int?
+  /// وحدات المنهاج بالترتيب — المرجع لتصنيف البنك واستخراج الأسئلة
+  units               String[]            @default([])
+  branch              Branch              @relation(fields: [branchId], references: [id])
+  examFiles           ExamFile[]
+  examBankQuestions   ExamBankQuestion[]
+  generatedQuestions  GeneratedQuestion[]
+  chatSessions        ChatSession[]
+  teachers            Teacher[]
+  knowledgeDocuments  KnowledgeDocument[]
+  knowledgeChunks     KnowledgeChunk[]
+  assessments         Assessment[]
+  createdAt           DateTime            @default(now())
+
+  @@unique([name, branchId])
+  @@index([branchId])
+}
+
+model ExamFile {
+  id           String         @id @default(cuid())
+  originalName String
+  s3Key        String         @unique
+  mimeType     String         @default("application/pdf")
+  fileSize     Int
+  status       ExamFileStatus @default(PENDING)
+  errorLog     String?
+  branchId     String
+  subjectId    String
+  year         Int
+  term         String
+  uploadedBy   String
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+
+  branch          Branch             @relation(fields: [branchId], references: [id])
+  subject         Subject            @relation(fields: [subjectId], references: [id])
+  uploader        User               @relation(fields: [uploadedBy], references: [id])
+  stagedQuestions StagedQuestion[]
+  document        KnowledgeDocument?
+
+  @@index([branchId])
+  @@index([subjectId])
+  @@index([status])
+  @@index([uploadedBy])
+  @@index([status, createdAt])
+  @@index([subjectId, createdAt])
+  @@index([createdAt])
+}
+
+/// Questions extracted by Gemini from a PDF, awaiting human review
+model StagedQuestion {
+  id                  String               @id @default(cuid())
+  examFileId          String
+  questionText        String
+  choices             Json
+  correctAnswer       String
+  explanation         String?
+  status              StagedQuestionStatus @default(PENDING)
+  reviewedBy          String?
+  reviewedAt          DateTime?
+  /// رقم السؤال بالورقة الأصلية
+  number              Int?
+  /// ثقة النموذج بالاستخراج (0..1)
+  confidence          Float?
+  /// تنبيهات للمراجع: بدون شرح، 3 خيارات، الإجابة مش بين الخيارات...
+  flags               String[]             @default([])
+  suggestedDifficulty DifficultyLevel?
+  suggestedBloom      BloomTaxonomyLevel?
+  suggestedUnit       String?
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
+
+  examFile ExamFile @relation(fields: [examFileId], references: [id], onDelete: Cascade)
+
+  @@index([examFileId])
+  @@index([status])
+  @@index([status, createdAt])
+}
+
+/// Approved, published exam bank question with vector embedding for hybrid search
+model ExamBankQuestion {
+  id              String                   @id @default(cuid())
+  questionText    String
+  choices         Json
+  correctAnswer   String
+  explanation     String?
+  branchId        String
+  subjectId       String
+  year            Int
+  term            String
+  difficulty      DifficultyLevel
+  bloomTaxonomy   BloomTaxonomyLevel
+  topicId         String? // Optional topic tag / free-text label
+  sourceFileId    String? // Reference to original ExamFile
+  embeddingStatus EmbeddingStatus          @default(PENDING)
+  // Vector embedding (768 dimensions)
+  embedding       Float[]                  @default([])
+  // tsvector column for full-text search (auto-populated by PostgreSQL trigger / queries)
+  searchVector    Unsupported("tsvector")?
+  /// كم مرة انستعمل السؤال مرجعاً بتوليد الأسئلة
+  usageCount      Int                      @default(0)
+  deletedAt       DateTime? // Soft delete timestamp
+  createdAt       DateTime                 @default(now())
+  updatedAt       DateTime                 @updatedAt
+
+  branch  Branch  @relation(fields: [branchId], references: [id])
+  subject Subject @relation(fields: [subjectId], references: [id])
+
+  @@index([branchId])
+  @@index([subjectId])
+  @@index([difficulty])
+  @@index([bloomTaxonomy])
+  @@index([year])
+  @@index([deletedAt])
+  @@index([embeddingStatus])
+  @@index([sourceFileId])
+  // شكل الاستعلام الفعلي بكل مسارات الاسترجاع: deletedAt IS NULL +
+  // subjectId + difficulty. الفهارس المفردة فوق ما بتغطيه.
+  @@index([deletedAt, subjectId, difficulty])
+  @@index([deletedAt, subjectId, year])
+  @@index([embeddingStatus, deletedAt])
+}
+
+/// ملف دخل قاعدة المعرفة (كتاب مدرسي أو امتحان) ومهمة معالجته بنفس السجل.
+/// خيارات المعالجة بتنحفظ مع الملف حتى إعادة المحاولة تمشي بنفس الإعدادات.
+model KnowledgeDocument {
+  id            String              @id @default(cuid())
+  kind          KnowledgeSourceKind
+  originalName  String
+  s3Key         String              @unique
+  mimeType      String
+  fileSize      Int
+  pageCount     Int?
+  subjectId     String
+  branchId      String
+  /// للامتحانات: ملف ExamFile المرتبط (الأسئلة المستخرجة معلّقة عليه)
+  examFileId    String?             @unique
+  /// للكتب: "1" أو "2" أو "all"
+  bookPart      String?
+  bookEdition   Int?
+  /// IngestionOptions — انظر knowledge/knowledge.types.ts
+  options       Json
+  stage         IngestionStage      @default(UPLOADED)
+  /// 0..100 داخل المرحلة الحالية
+  progress      Int                 @default(0)
+  failedStage   IngestionStage?
+  error         String?
+  /// أسطر السجل: [{ at, level, step, message }]
+  log           Json                @default("[]")
+  /// مدة كل مرحلة بالمللي ثانية: { EXTRACTING: 38000, ... }
+  stageTimings  Json                @default("{}")
+  chunkCount    Int                 @default(0)
+  questionCount Int                 @default(0)
+  uploadedBy    String
+  finishedAt    DateTime?
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
+
+  subject  Subject          @relation(fields: [subjectId], references: [id])
+  branch   Branch           @relation(fields: [branchId], references: [id])
+  examFile ExamFile?        @relation(fields: [examFileId], references: [id], onDelete: Cascade)
+  uploader User             @relation(fields: [uploadedBy], references: [id])
+  chunks   KnowledgeChunk[]
+
+  @@index([kind, createdAt])
+  @@index([subjectId])
+  @@index([subjectId, kind, createdAt])
+  @@index([stage])
+  @@index([branchId, stage])
+}
+
+/// مقطع نصي من كتاب، مع متجه التضمين تبعه للبحث الهجين.
+model KnowledgeChunk {
+  id              String          @id @default(cuid())
+  documentId      String
+  subjectId       String
+  ordinal         Int
+  pageStart       Int
+  pageEnd         Int
+  /// مسار العناوين: "الوحدة 3 › الحموض والقواعد › ثابت التأين"
+  section         String?
+  /// أعلى عنوان بالمسار — بيستعمل كوحدة بالفلترة
+  unit            String?
+  text            String
+  tokens          Int
+  embeddingStatus EmbeddingStatus @default(PENDING)
+  embedding       Float[]         @default([])
+  embeddingModel  String?
+  createdAt       DateTime        @default(now())
+
+  document KnowledgeDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  subject  Subject           @relation(fields: [subjectId], references: [id])
+
+  @@unique([documentId, ordinal])
+  @@index([subjectId, embeddingStatus])
+  @@index([subjectId, unit])
+  @@index([documentId, embeddingStatus])
+}
+
+/// إعدادات عامة بصيغة مفتاح/قيمة (مثلاً خيارات المعالجة الافتراضية).
+model AppSetting {
+  key       String   @id
+  value     Json
+  updatedBy String?
+  updatedAt DateTime @updatedAt
+}
+
+enum StyleSourceUploadStatus {
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+enum GeneratedQuestionSourceType {
+  BANK_RAG
+  UPLOAD_STYLE_MATCH
+}
+
+/// Ephemeral upload of a student's style-source sheet (PDF / image).
+/// The raw file in S3 is automatically purged after 24 hours via lifecycle rule.
+model StyleSourceUpload {
+  id          String                  @id @default(cuid())
+  studentId   String // ID of the uploading student
+  s3Key       String                  @unique
+  mimeType    String
+  fileSize    Int
+  status      StyleSourceUploadStatus @default(PROCESSING)
+  errorLog    String?
+  /// Extracted style blueprint — cached in Redis, persisted here as JSONB fallback
+  styleMatrix Json?
+  createdAt   DateTime                @default(now())
+  updatedAt   DateTime                @updatedAt
+
+  student            User                @relation("StudentStyleUploads", fields: [studentId], references: [id])
+  generatedQuestions GeneratedQuestion[]
+
+  @@index([studentId])
+  @@index([status])
+}
+
+model GeneratedQuestion {
+  id                String                      @id @default(cuid())
+  studentId         String
+  subjectId         String
+  topicId           String?
+  questionText      String
+  choices           Json
+  correctAnswer     String
+  explanation       String?
+  bloomTaxonomy     BloomTaxonomyLevel?
+  difficulty        DifficultyLevel?
+  sourceType        GeneratedQuestionSourceType @default(BANK_RAG)
+  /// JSONB provenance: { styleUploadId?, bankQuestionIds: string[] }
+  referenceMetadata Json?
+  styleUploadId     String?
+  createdAt         DateTime                    @default(now())
+
+  student     User               @relation("StudentGeneratedQuestions", fields: [studentId], references: [id])
+  subject     Subject            @relation(fields: [subjectId], references: [id])
+  styleUpload StyleSourceUpload? @relation(fields: [styleUploadId], references: [id])
+
+  @@index([studentId])
+  @@index([subjectId])
+  @@index([sourceType])
+  @@index([styleUploadId])
+  @@index([studentId, subjectId, createdAt])
+}
+
+enum ChatMessageRole {
+  STUDENT
+  ASSISTANT
+  SYSTEM
+}
+
+enum ChatMessageType {
+  TEXT
+  FILE_UPLOAD
+  QUESTIONS
+  ERROR
+}
+
+model ChatSession {
+  id          String    @id @default(cuid())
+  studentId   String
+  subjectId   String
+  isActive    Boolean   @default(true)
+  /// بلاغ من فريق الإدارة لمراجعة جودة الردود
+  flaggedAt   DateTime?
+  flaggedById String?
+  flagNote    String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  student   User          @relation("StudentChatSessions", fields: [studentId], references: [id])
+  flaggedBy User?         @relation("FlaggedChatSessions", fields: [flaggedById], references: [id], onDelete: SetNull)
+  subject   Subject       @relation(fields: [subjectId], references: [id])
+  messages  ChatMessage[]
+
+  @@index([studentId])
+  @@index([subjectId])
+  @@index([studentId, subjectId])
+  @@index([studentId, updatedAt])
+  @@index([studentId, isActive, updatedAt])
+  @@index([flaggedAt])
+  @@index([updatedAt])
+}
+
+model ChatMessage {
+  id           String          @id @default(cuid())
+  sessionId    String
+  role         ChatMessageRole
+  type         ChatMessageType @default(TEXT)
+  content      String
+  fileUrl      String?
+  fileMimeType String?
+  metadata     Json?
+  createdAt    DateTime        @default(now())
+
+  session ChatSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId])
+  @@index([sessionId, createdAt])
+}
+
+model Teacher {
+  id                String   @id @default(cuid())
+  name              String
+  title             String
+  bio               String
+  imageUrl          String?
+  imageKey          String?
+  subjectId         String?
+  yearsOfExperience Int?
+  isActive          Boolean  @default(true)
+  displayOrder      Int      @default(0)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  subject Subject? @relation(fields: [subjectId], references: [id], onDelete: SetNull)
+
+  @@index([subjectId])
+  @@index([isActive])
+  @@index([displayOrder])
+  @@index([isActive, displayOrder])
+}
+
+/// سطر لكل طلب لنموذج ذكاء اصطناعي (توليد، تصنيف، استخراج، تضمين...) —
+/// مصدر صفحة «الاستهلاك والحصص» والميزانية.
+model AiUsageLog {
+  id           String   @id @default(cuid())
+  /// classification | generation | answer | extraction | validation | style | transcription | embedding
+  task         String
+  /// anthropic | openrouter | local
+  provider     String
+  model        String
+  inputTokens  Int      @default(0)
+  outputTokens Int      @default(0)
+  costUsd      Float    @default(0)
+  latencyMs    Int
+  success      Boolean
+  error        String?
+  /// صاحب الطلب إذا جا من طلب HTTP موثّق (فاضي لمهام الخلفية)
+  userId       String?
+  user         User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  createdAt    DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([model, createdAt])
+  @@index([userId, createdAt])
+  @@index([task, createdAt])
+}
+
+model Assessment {
+  id              String               @id @default(cuid())
+  title           String
+  subjectId       String
+  difficultyLevel DifficultyLevel      @default(MEDIUM)
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @updatedAt
+
+  subject         Subject              @relation(fields: [subjectId], references: [id])
+  questions       AssessmentQuestion[]
+  attempts        AssessmentAttempt[]
+
+  @@index([subjectId])
+  @@index([createdAt])
+  @@index([subjectId, createdAt])
+}
+
+model AssessmentQuestion {
+  id                 String             @id @default(cuid())
+  assessmentId       String
+  questionText       String
+  options            Json
+  correctAnswer      String
+  bloomTaxonomyLevel BloomTaxonomyLevel
+  explanation        String?
+  createdAt          DateTime           @default(now())
+
+  assessment         Assessment         @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+  answers            AssessmentAnswer[]
+
+  @@index([assessmentId])
+}
+
+model AssessmentAttempt {
+  id           String                  @id @default(cuid())
+  userId       String
+  assessmentId String
+  score        Float?
+  status       AssessmentAttemptStatus @default(PENDING)
+  aiFeedback   String?
+  startedAt    DateTime                @default(now())
+  completedAt  DateTime?
+
+  user         User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  assessment   Assessment              @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+  answers      AssessmentAnswer[]
+
+  @@index([userId])
+  @@index([assessmentId])
+  @@index([status])
+  @@index([userId, status])
+  @@index([userId, startedAt])
+  @@index([assessmentId, status])
+}
+
+model AssessmentAnswer {
+  id            String             @id @default(cuid())
+  attemptId     String
+  questionId    String
+  studentAnswer String
+  isCorrect     Boolean
+  createdAt     DateTime           @default(now())
+
+  attempt       AssessmentAttempt  @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+  question      AssessmentQuestion @relation(fields: [questionId], references: [id], onDelete: Cascade)
+
+  @@unique([attemptId, questionId])
+  @@index([attemptId])
+  @@index([questionId])
+}
+
+model ParentStudentLink {
+  id                  String           @id @default(cuid())
+  studentId           String
+  parentId            String
+  parentPhone         String
+  pinHash             String
+  magicTokenHash      String?
+  magicTokenExpiresAt DateTime?
+  status              ParentLinkStatus @default(PENDING)
+  createdAt           DateTime         @default(now())
+  updatedAt           DateTime         @updatedAt
+
+  student             User             @relation("StudentRelations", fields: [studentId], references: [id], onDelete: Cascade)
+  parent              User             @relation("ParentRelations", fields: [parentId], references: [id], onDelete: Cascade)
+
+  @@unique([studentId, parentId])
+  @@index([studentId])
+  @@index([parentId])
+  @@index([parentPhone])
+  @@index([magicTokenHash])
+  @@index([status])
+}
+
+model PushSubscription {
+  id        String   @id @default(cuid())
+  userId    String
+  endpoint  String   @unique
+  p256dh    String
+  auth      String
+  userAgent String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model StudentActivityEvent {
+  id        String   @id @default(cuid())
+  studentId String
+  eventType String
+  title     String
+  metadata  Json?
+  createdAt DateTime @default(now())
+
+  student   User     @relation("StudentActivityEvents", fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@index([studentId])
+  @@index([studentId, createdAt])
+  @@index([eventType])
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  EXPIRED
+  CANCELLED
+}
+
+model SubscriptionPlan {
+  id                   String             @id @default(cuid())
+  code                 String             @unique
+  name                 String
+  description          String
+  price                Float              @default(0)
+  currency             String             @default("ILS")
+  intervalDays         Int                @default(30)
+  dailyQuizLimit       Int?
+  dailyAssessmentLimit Int?
+  dailyChatLimit       Int?
+  features             String[]           @default([])
+  badge                String?
+  isActive             Boolean            @default(true)
+  displayOrder         Int                @default(0)
+  subscriptions        UserSubscription[]
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
+}
+
+model UserSubscription {
+  id            String             @id @default(cuid())
+  userId        String
+  user          User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  planId        String
+  plan          SubscriptionPlan   @relation(fields: [planId], references: [id])
+  status        SubscriptionStatus @default(ACTIVE)
+  startedAt     DateTime           @default(now())
+  expiresAt     DateTime
+  paymentMethod String?
+  paymentRef    String?
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+
+  @@index([userId, status])
+  @@index([expiresAt])
+}
+
+model SubscriptionVoucher {
+  id           String    @id @default(cuid())
+  code         String    @unique
+  planCode     String
+  durationDays Int       @default(30)
+  isRedeemed   Boolean   @default(false)
+  redeemedBy   String?
+  redeemedAt   DateTime?
+  createdBy    String    @default("admin")
+  expiresAt    DateTime?
+  createdAt    DateTime  @default(now())
+
+  @@index([code])
+}
+

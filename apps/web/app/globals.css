@@ -1,0 +1,184 @@
+@import "tailwindcss";
+
+/*
+ * نظام التصميم — مصدر واحد للألوان والظلال والخط.
+ *
+ * الكحلي (navy) هو لون الهوية والثقة، والأخضر المائي (teal) للأفعال
+ * الإيجابية والتقدّم، والذهبي من ريشة الشعار للإنجاز فقط وبقلّة.
+ * كل الصفحات بتستعمل هالأسماء بدل ألوان hex مكتوبة جوا الكلاسات.
+ */
+@theme {
+  --font-sans: var(--font-plex), ui-sans-serif, system-ui, "Segoe UI", Tahoma, sans-serif;
+  --font-quran: var(--font-amiri-quran), "Amiri Quran", "KFGQPC Uthmanic Script HAFS", serif;
+  --font-naskh: var(--font-amiri), "Amiri", "Noto Naskh Arabic", serif;
+
+  --color-navy-50: #f1f5fa;
+  --color-navy-100: #e1e9f3;
+  --color-navy-200: #c3d3e6;
+  --color-navy-300: #94afcf;
+  --color-navy-400: #5e83b0;
+  --color-navy-500: #3a6293;
+  --color-navy-600: #234b7a;
+  --color-navy-700: #133c69;
+  --color-navy-800: #0a3462;
+  --color-navy-900: #002c5a;
+  --color-navy-950: #001a38;
+
+  --color-teal-50: #edf8f6;
+  --color-teal-100: #d3efea;
+  --color-teal-200: #a8ded5;
+  --color-teal-300: #72c7b9;
+  --color-teal-400: #3fae9d;
+  --color-teal-500: #1e9a88;
+  --color-teal-600: #12897a;
+  --color-teal-700: #0e6f63;
+  --color-teal-800: #0d5850;
+  --color-teal-900: #0c4842;
+
+  --color-gold-50: #fbf6e9;
+  --color-gold-100: #f5eac8;
+  --color-gold-400: #d9b456;
+  --color-gold-500: #c59a2e;
+  --color-gold-600: #a67c1b;
+
+  /* الأسطح والنص */
+  --color-canvas: #f6f8fb;
+  --color-line: #e4e9f0;
+  --color-ink: #0e1b2c;
+  --color-muted: #5b6b80;
+  --color-subtle: #8593a6;
+
+  --shadow-card: 0 1px 2px rgb(16 24 40 / 0.04), 0 1px 3px rgb(16 24 40 / 0.06);
+  --shadow-raised: 0 12px 32px -12px rgb(0 44 90 / 0.18);
+  --shadow-float: 0 28px 64px -28px rgb(0 44 90 / 0.35);
+
+  --animate-rise: rise 0.6s cubic-bezier(0.16, 1, 0.3, 1) both;
+  --animate-fade: fade 0.4s ease-out both;
+
+  @keyframes rise {
+    from { opacity: 0; transform: translateY(12px); }
+    to { opacity: 1; transform: none; }
+  }
+  @keyframes fade {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+}
+
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+    text-rendering: optimizeLegibility;
+    scroll-padding-top: 5rem;
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    html { scroll-behavior: smooth; }
+  }
+  body {
+    background: #ffffff;
+    color: var(--color-ink);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+  ::selection {
+    background: color-mix(in oklab, var(--color-teal-600) 22%, transparent);
+    color: var(--color-navy-950);
+  }
+  :focus-visible {
+    outline: 2px solid var(--color-teal-600);
+    outline-offset: 2px;
+  }
+  /* الأرقام بالعرض الثابت بالإحصائيات والمؤقتات */
+  .tabular { font-variant-numeric: tabular-nums; }
+}
+
+@utility container-page {
+  margin-inline: auto;
+  width: 100%;
+  max-width: 80rem;
+  padding-inline: 1rem;
+  @media (width >= 40rem) { padding-inline: 1.5rem; }
+  @media (width >= 64rem) { padding-inline: 2rem; }
+}
+
+/* شبكة خفيفة خلف الأقسام الافتتاحية */
+@utility bg-grid {
+  background-image:
+    linear-gradient(to right, rgb(0 44 90 / 0.05) 1px, transparent 1px),
+    linear-gradient(to bottom, rgb(0 44 90 / 0.05) 1px, transparent 1px);
+  background-size: 44px 44px;
+}
+@utility bg-grid-inverse {
+  background-image:
+    linear-gradient(to right, rgb(255 255 255 / 0.06) 1px, transparent 1px),
+    linear-gradient(to bottom, rgb(255 255 255 / 0.06) 1px, transparent 1px);
+  background-size: 44px 44px;
+}
+
+/*
+ * ظهور الأقسام عند التمرير — CSS فقط، بدون ولا سطر JavaScript.
+ * بالمتصفحات يلي ما بتدعم scroll-driven animations المحتوى ظاهر عادي،
+ * وتحت prefers-reduced-motion ما في أي حركة.
+ */
+@keyframes reveal-up {
+  from { opacity: 0; transform: translateY(24px); }
+  to { opacity: 1; transform: none; }
+}
+@supports (animation-timeline: view()) {
+  @media (prefers-reduced-motion: no-preference) {
+    .reveal {
+      animation: reveal-up linear both;
+      animation-timeline: view();
+      animation-range: entry 0% cover 22%;
+    }
+  }
+}
+
+/* ---- الإشعارات (ToastProvider) ---- */
+@keyframes toast-in {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes toast-enter {
+  from { opacity: 0; transform: translateY(-8px) scale(0.98); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes toast-exit {
+  from { opacity: 1; transform: none; }
+  to { opacity: 0; transform: translateY(-8px) scale(0.98); }
+}
+@keyframes progress-shrink {
+  from { width: 100%; }
+  to { width: 0%; }
+}
+.animate-toast-in { animation: toast-in 0.3s ease-out; }
+.animate-toast-custom-in { animation: toast-enter 0.35s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
+.animate-toast-custom-out { animation: toast-exit 0.3s ease-in forwards; }
+.animate-progress { animation: progress-shrink 6s linear forwards; }
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/*
+ * معادلات KaTeX (components/ui/RichText). حجمها الافتراضي ١٫٢١em كبير جنب
+ * Plex العربي، والمعادلة المضمّنة ما لازم تنكسر على سطرين.
+ */
+.rich-math .katex {
+  font-size: 1.08em;
+  white-space: nowrap;
+}
+.rich-math-block .katex-display {
+  margin: 0;
+  padding: 0.25rem 0;
+}
+.rich-math-block .katex {
+  font-size: 1.12em;
+}
